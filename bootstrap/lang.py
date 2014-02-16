@@ -78,11 +78,6 @@ def main():int
     return 0;
 }
 
-def error():pointer
-{
-    pointer = error;
-}
-
 '''
     
 compile(source, '<source>')
