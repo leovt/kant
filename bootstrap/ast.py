@@ -18,7 +18,7 @@ def ptree(tree, lvl=0):
     head = tree[0]
     if head in ('name', 'num'):
         print '%s%s:%r' % ('  '*lvl, head, tree[1])
-    elif head in ('+', '-', '*', '/', '%', '=', 'and', 'or', '=='):
+    elif head in ('+', '-', '*', '/', '%', '=', 'and', 'or', '==', 'return'):
         print '%s%s:' % ('  '*lvl, head)
         for sub in tree[2:]:
             ptree(sub, lvl+1)
@@ -34,6 +34,8 @@ def stree(tree):
         return '(%s %s %s)' % (head, stree(tree[2]), stree(tree[3]))
     elif head in ('name', 'num'):
         return '(%s %r)' % (tree[0], tree[1])
+    elif head in ('return', ):
+        return '(' + ' '.join([head] + map(stree, tree[2:])) + ')'        
     else:
         return '(' + ' '.join([head] + map(stree, tree[1:])) + ')'
          

@@ -103,10 +103,11 @@ def statement():
     elif next_token.type == 'def':
         return definition()
     elif next_token.type == 'return':
+        tok = next_token
         consume()
         expr = expression()
         expect(';')
-        return ('return', expr)
+        return ('return', tok, expr)
     else:
         result = ('expr-stmt', expression())
         expect(';')
