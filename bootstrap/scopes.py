@@ -1,7 +1,8 @@
 from collections import namedtuple
+from itertools import count
 import operator
 
-Symbol = namedtuple('Symbol', 'token, type, alloc, value, adress')
+Symbol = namedtuple('Symbol', 'token, type, alloc, value, varid, scope')
 
 BUILTIN_TYPE_INT =   '[builtin type integer]'
 BUILTIN_TYPE_FLOAT = '[builtin type float]'
@@ -19,33 +20,19 @@ def sizeof(typ):
             BUILTIN_TYPE_BOOL: 1,
             BUILTIN_TYPE_BYTE: 1}[typ]
 
+variable = count(10000)
+
 class Scope:
-    def __init__(self, parent):
+    def __init__(self, parent, frame):
         self.names = {}
         self.parent = parent
-        self._size = None
-        
-    @property
-    def size(self):
-        if self._size is not None:
-            return self._size
-        else:
-            return self.parent.size
-        
-    @size.setter
-    def size(self, val):
-        if self._size is not None:
-            self._size = val
-        else:
-            self.parent.size = val
+        self.frame = frame
         
     def new_child(self):
-        return Scope(self)
+        return Scope(self, self.frame)
     
     def new_function(self):
-        child = Scope(self)
-        child._size = 0
-        return child
+        return Scope(self, [])
     
     def resolve(self, name):
         scope = self
@@ -60,10 +47,12 @@ class Scope:
             error('Redefining name %s is not permitted' % name, token)
         else:
             if allocate:
-                self.names[name] = Symbol(token, typ, allocate, value, self.size)
-                self.size += sizeof(typ)
+                varid = next(variable)
+                self.names[name] = symb = Symbol(token, typ, allocate, value, varid, self)
+                self.frame.append((varid, typ))
             else:
-                self.names[name] = Symbol(token, typ, allocate, value, None)
+                self.names[name] = symb = Symbol(token, typ, allocate, value, None, self)
+            return symb
     
     
 class CodeConstants():
@@ -78,7 +67,7 @@ class CodeConstants():
         return self.constants[value][0]
 
 def build(ast):
-    builtins = Scope(None)
+    builtins = Scope(None, [])
     builtins.add_name('int',   None, BUILTIN_TYPE_TYPE, 0, BUILTIN_TYPE_INT)
     builtins.add_name('float', None, BUILTIN_TYPE_TYPE, 0, BUILTIN_TYPE_FLOAT)
     builtins.add_name('type',  None, BUILTIN_TYPE_TYPE, 0, BUILTIN_TYPE_TYPE)
@@ -87,116 +76,89 @@ def build(ast):
     builtins.add_name('true',  None, BUILTIN_TYPE_BOOL, 0, True)
     builtins.add_name('false', None, BUILTIN_TYPE_BOOL, 0, False)
     
-    code = []
-    walk(ast, builtins.new_function(), None, code)
-    return code
+    code_blocks = []
+    globals = builtins.new_function()
+    walk(ast, globals, None, None, code_blocks)
+    code = [x for block in code_blocks for x in block]
+    return code, globals
     
 
-from itertools import count
 label = count(100)
 
-def walk(ast, scope, current_function, code):
-    operators = {'+': 'add', '-': 'sub', 
-                 '*': 'mul', '/': 'div', '%': 'mod', 
-                 'and': 'and', 'or': 'or', 
-                 '==': 'eq'}
+def walk(ast, scope, current_function, current_code_block, code_blocks):
     def emit(*args):
-        code.append(args)
-        
-    if ast[0] in operators:
-        assert False, 'operators must be visited by walk_expression %r' % ast[0]
-        walk(ast[2], scope, code)
-        walk(ast[3], scope, code)
-        emit(operators[ast[0]])
-        
-    elif ast[0] == 'func-call':
-        assert False, 'function calls must be visited by walk_expression %r' % ast[0]
-        if ast[1][0] == 'name':
-            symbol = scope.resolve(ast[2])
-        else:
-            error('currently only named funcitons can be called', ast)
-        
-        #walk(ast[2], scope, code)
-        emit('call', symbol.value)
-        
-    elif ast[0] == 'name':
-        assert False, 'name must be visited by walk_expression'
-        typ = scope.resolve(ast[1])
-        if typ is None:
-            error('using undeclared name %r' % ast[1], ast)
-        else:
-            emit('load_name', ast[1])
-    elif ast[0] == 'num':
-        assert False, 'num must be visited by walk_expression'
-        emit('load_const', ast[1])
-    elif ast[0] == 'stmt-seq':
-        child = scope.new_child()
-        for sub in ast[1:]:
-            walk(sub, child, current_function, code)
-    elif ast[0] == 'call-args':
-        assert False, 'call-args must be visited by walk_expression'
-        for sub in ast[1:]:
-            walk(sub, scope, current_function, code)
-    elif ast[0] == 'expr-stmt':
+        current_code_block.append(args)
+
+    if ast[0] == 'expr-stmt':
         expr = walk_expression(ast[1], scope)
-        code.extend(expr.code)
-        emit('pop')
+        current_code_block.extend(expr.code)
+        emit('pop', expr.type)
     elif ast[0] == 'return':
         expr = walk_expression(ast[2], scope)
         func = scope.resolve(current_function)
         if func.type[1] != expr.type:
             error('function %r is declared as returning %r, but returns %r.' % (current_function, func.type[1], expr.type), 
                   ast[1])
-        code.extend(expr.code)
-        emit('ret')
+        current_code_block.extend(expr.code)
+        emit('ret', expr.type)
+    elif ast[0] == 'stmt-seq':
+        for stmt in ast[1:]:
+            walk(stmt, scope, current_function, current_code_block, code_blocks)
     elif ast[0] == 'if-stmt':
         else_label = next(label)
         end_label = next(label)
         condition = walk_expression(ast[1], scope)
         if condition.type != BUILTIN_TYPE_BOOL:
             error('if-condition must be boolean')
-        code.extend(condition.code)
+        current_code_block.extend(condition.code)
         emit('jump_if_false', else_label)
-        walk(ast[2], scope, current_function, code)
+        walk(ast[2], scope, current_function, current_code_block, code_blocks)
         emit('jump', end_label)
         emit('label', else_label)
-        walk(ast[3], scope, current_function, code)
+        walk(ast[3], scope, current_function, current_code_block, code_blocks)
         emit('label', end_label)
     elif ast[0] == '=':
-        walk(ast[3], scope, code)
+        walk(ast[3], scope, current_code_block, code_blocks)
         if ast[2][0] == 'name':
-            typ = scope.resolve(ast[2][1])
-            emit('type-check', typ)
-            emit('store_name', ast[2][1])
+            symb = scope.resolve(ast[2][1])
+            emit('type-check', symb)
+            if symb.scope.frame is scope.frame:
+                op = 'store_local'
+            else:
+                op = 'store_name'
+            emit(op, ast[2][1], symb.type, symb.varid)
     elif ast[0] == 'var-def':
         # find the type
         declared_type = get_type(ast[2], scope)
+        # evaluate the expression before adding the name to the scope
         expression = walk_expression(ast[3], scope)
-        code.extend(expression.code)
         if expression.type != declared_type:
             error('Declared type %r does not match expression type %r' % (declared_type, expression.type), ast[1])
-        # create the variable
-        emit('make_var', ast[1][1], declared_type)
-        # evaluate the expression before adding the name to the scope
-        
-        expr = walk_expression(ast[3], scope)
+
         # add the name to the scope and store the result
-        scope.add_name(ast[1][1], ast[1], declared_type, 1, None)
-        code.extend(expr.code)
-        emit('store_name', ast[1][1])
+        symb = scope.add_name(ast[1][1], ast[1], declared_type, 1, None)
+        current_code_block.extend(expression.code)
+        emit('store_local', ast[1][1], symb.type, symb.varid)
     elif ast[0] == 'func-def':
         func_label = next(label)
         scope.add_name(ast[1][1], ast[1], get_function_type(ast, scope), 0, func_label)
         child = scope.new_function()
+        child_code = []
 
-        for arg in ast[3][1:]:
-            child.add_name(arg[1][1], arg[1], get_type(arg[2], scope), 1, None)
-            
-        emit('label', func_label)
+        child_code.append(('#', 'begin of function %s' % ast[1][1]))
+        child_code.append(('label', func_label))
 
-        walk(ast[4], child, ast[1][1], code)
-        if code[-1][0] != 'ret':
+        for arg in ast[3][:0:-1]:
+            symb = child.add_name(arg[1][1], arg[1], get_type(arg[2], scope), 1, None)
+            child_code.append(('store_local', arg[1][1], symb.type, symb.varid))
+        
+        walk(ast[4], child, ast[1][1], child_code, code_blocks)
+        
+        if child_code[-1][0] != 'ret':
             error('Function %r does not end in a return statement' % ast[1][1], ast[1])
+        
+        child_code.append(('#', 'end of function %s' % ast[1][1]))
+        code_blocks.append(child_code)
     else:
         assert False, 'unhandled node %r' % ast[0]
 
@@ -233,10 +195,14 @@ def walk_expression(ast, scope):
         symbol = scope.resolve(ast[1])
         if symbol is None:
             error('Name %r is not defined' % ast[1], ast)
-            symbol = Symbol(ast, None, None)
+            symbol = Symbol(ast, None, None, None, None, scope)
         if symbol.value is not None:
             return ExpressionType(True, symbol.type, symbol.value, [])
-        return ExpressionType(False, symbol.type, None, [('load_name', ast[1], scope)])
+        if symbol.scope.frame == scope.frame:
+            op = 'load_local'
+        else:
+            op = 'load_name'
+        return ExpressionType(False, symbol.type, None, [(op, ast[1], symbol.type, symbol.varid)])
     elif ast[0] == 'num':
         if '.' in ast.lexeme:
             try:
@@ -280,11 +246,7 @@ def walk_expression(ast, scope):
                       '/': 'div',
                       '%': 'mod',
                       '==': 'eq'}[ast[0]]
-            opcode += {BUILTIN_TYPE_INT: 'i',
-                       BUILTIN_TYPE_FLOAT: 'f',
-                       BUILTIN_TYPE_BOOL: 'B',
-                       BUILTIN_TYPE_BYTE: 'b'}[op1.type]
-            return ExpressionType(False, ret_type, None, op1.code + op2.code + [(opcode,)])
+            return ExpressionType(False, ret_type, None, op1.code + op2.code + [(opcode, op1.type)])
     elif ast[0] == '=':
         op1 = walk_expression(ast[2], scope)
         op2 = walk_expression(ast[3], scope)
