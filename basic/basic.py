@@ -8,6 +8,8 @@ src = '''
 70 PRINT "HELLO," ; NAME ; I
 80 GOTO 50
 90 NAME = NAME + ""
+95 I = I = 1
+96 I = NAME = "NAME"
 100 END
 '''
 
@@ -141,18 +143,18 @@ def expr(tokens, lineno, context):
     def operation(op, a, b):
         type_a = a[1]
         type_b = b[1]
-        ops = {('int', '+', 'int'): 'int',
-               ('int', '-', 'int'): 'int',
-               ('int', '*', 'int'): 'int',
-               ('int', '/', 'int'): 'int',
-               ('str', '+', 'str'): 'str',
-               ('int', '=', 'int'): 'int',
-               ('str', '=', 'str'): 'int'}
-        type_r = ops.get((type_a, op, type_b), None)
+        ops = {('int', '+', 'int'): ('int', 'add_int'),
+               ('int', '-', 'int'): ('int', 'sub_int'),
+               ('int', '*', 'int'): ('int', 'mul_int'),
+               ('int', '/', 'int'): ('int', 'div_int'),
+               ('str', '+', 'str'): ('str', 'cat_str'),
+               ('int', '=', 'int'): ('int', 'eq_int'),
+               ('str', '=', 'str'): ('int', 'eq_str')}
+        type_r, typed_op = ops.get((type_a, op, type_b), None)
         if type_r is None:
             error('invalid use of operator types %s %s %s on line %d' % (type_a, op, type_b, lineno))
         else:
-            return (op, type_r, a, b)
+            return (typed_op, type_r, a, b)
 
     for t in tokens:
         if t.isdigit():
@@ -193,7 +195,7 @@ def expr(tokens, lineno, context):
 
     return result.pop()
 
-class Context:
+class ASTContext:
     def __init__(self):
         self.symbols = {}
         self.nb_int = 0
@@ -215,7 +217,7 @@ class Context:
         
 
 def parse():
-    context = Context()
+    context = ASTContext()
 
     lastno = 0
     
@@ -240,122 +242,178 @@ def parse():
 
 from operator import add, sub, mul, div, eq
 
-def evaluate(expr, integers, strings, const_int, const_str):
-    if expr[0] in '+-*/=':
-        a = evaluate(expr[2], integers, strings, const_int, const_str)
-        b = evaluate(expr[3], integers, strings, const_int, const_str)
-        return {'+': add, '-': sub, '*': mul, '/': div, '=': eq}[expr[0]](a, b)
-    elif expr[0] == 'var':
-        if expr[1] == 'int':
-            return integers[expr[2]]
-        elif expr[1] == 'str':
-            return strings[expr[2]]
+operations = {
+    'add_int': add,
+    'sub_int': sub,
+    'mul_int': mul,
+    'div_int': div,
+    'eq_int': eq,
+    'eq_str': eq,
+    'cat_str': add}
+
+class ASTInterpreter:
+    def __init__(self, ast_context):
+        self.const_int = ast_context.const_int
+        self.const_str = ast_context.const_str
+        self.integers = [0] * ast_context.nb_int
+        self.strings = [''] * ast_context.nb_str
+        self.code = ast_context.code
+        self.labels = ast_context.labels
+
+    def evaluate(self, expr):
+        if expr[0] in operations:
+            a = self.evaluate(expr[2])
+            b = self.evaluate(expr[3])
+            return operations[expr[0]](a, b)
+        elif expr[0] == 'var':
+            if expr[1] == 'int':
+                return self.integers[expr[2]]
+            elif expr[1] == 'str':
+                return self.strings[expr[2]]
+            else:
+                assert False
+        elif expr[0] == 'cst':
+            if expr[1] == 'int':
+                return self.const_int[expr[2]]
+            elif expr[1] == 'str':
+                return self.const_str[expr[2]]
+            else:
+                assert False
         else:
-            assert False
-    elif expr[0] == 'cst':
-        if expr[1] == 'int':
-            return const_int[expr[2]]
-        elif expr[1] == 'str':
-            return const_str[expr[2]]
+            assert False, expr
+
+    def execute(self):
+        ip = 0
+        while True:
+            instr = self.code[ip]
+            ip += 1
+            jump = self.exec_one_instr(instr)
+            if jump is 'end':
+                return
+            elif jump is not None:
+                ip = self.labels[jump]
+
+    def exec_one_instr(self, instr):
+        if instr[0] == 'input':
+            prompt = self.evaluate(instr[1])
+            result = raw_input(prompt)
+            if instr[2] == 'int':
+                self.integers[instr[3]] = int(result)
+            else:
+                self.strings[instr[3]] = result
+        elif instr[0] == 'assign':
+            if instr[1] == 'int':
+                self.integers[instr[2]] = self.evaluate(instr[3])
+            elif instr[1] == 'str':
+                self.strings[instr[2]] = self.evaluate(instr[3])
+        elif instr[0] == 'if':
+            cond = self.evaluate(instr[1])
+            if cond:
+                return self.exec_one_instr(instr[2])
+        elif instr[0] == 'goto':
+            return instr[1]
+        elif instr[0] == 'print':
+            print ' '.join(str(self.evaluate(ex)) for ex in instr[1:])
+        elif instr[0] == 'end':
+            return 'end'
         else:
-            assert False
-    else:
-        assert False, expr
+            assert False, instr
 
-def execute(context):
-    integers = [0] * ctx.nb_int
-    strings = [''] * ctx.nb_str
-    ip = 0
-    while True:
-        instr = context.code[ip]
-        ip += 1
-        jump = exec_one_instr(instr, integers, strings, context.const_int, context.const_str)
-        if jump is 'end':
-            return
-        elif jump is not None:
-            ip = context.labels[jump]
 
-def exec_one_instr(instr, integers, strings, const_int, const_str):
-    if instr[0] == 'input':
-        prompt = evaluate(instr[1], integers, strings, const_int, const_str)
-        result = raw_input(prompt)
-        if instr[2] == 'int':
-            integers[instr[3]] = int(result)
-        else:
-            strings[instr[3]] = result
-    elif instr[0] == 'assign':
-        if instr[1] == 'int':
-            integers[instr[2]] = evaluate(instr[3], integers, strings, const_int, const_str)
-        elif instr[1] == 'str':
-            strings[instr[2]] = evaluate(instr[3], integers, strings, const_int, const_str)
-    elif instr[0] == 'if':
-        cond = evaluate(instr[1], integers, strings, const_int, const_str)
-        if cond:
-            return exec_one_instr(instr[2], integers, strings, const_int, const_str)
-    elif instr[0] == 'goto':
-        return instr[1]
-    elif instr[0] == 'print':
-        print ' '.join(str(evaluate(ex, integers, strings, const_int, const_str)) for ex in instr[1:])
-    elif instr[0] == 'end':
-        return 'end'
-    else:
-        assert False, instr
+class BCContext():
+    def __init__(self, ast_context):
+        self.code = []
+        self.jmps = []
 
-def translate_expr(expr, context, code):
-    if expr[0] in '+-*/=':
-        translate_expr(expr[2], context, code)
-        translate_expr(expr[3], context, code)
-        code.append(({'+': 'add', '-': 'sub', '*': 'mul', '/': 'div', '=': 'eq'}[expr[0]]+'_'+expr[1],))
-    elif expr[0] == 'var':
-        code.append(('load_'+expr[1], expr[2]))
-    elif expr[0] == 'cst':
-        code.append(('load_const_'+expr[1], expr[2]))
-    else:
-        assert False, expr
-
-        
-def translate_instr(instr, context, code, jmps):
-    if instr[0] == 'input':
-        translate_expr(instr[1], context, code)
-        code.append(('print_' + instr[1][1], ))
-        code.append(('input_' + instr[2], instr[3]))
-    elif instr[0] == 'assign':
-        translate_expr(instr[3], context, code)
-        code.append(('save_' + instr[1], instr[2]))
-    elif instr[0] == 'if':
-        translate_expr(instr[1], context, code)
-        jmp_instr = len(code)
-        code.append(None)
-        translate_instr(instr[2], context, code, jmps)
-        code[jmp_instr] = ('jmpz', len(code))
-    elif instr[0] == 'goto':
-        jmps.append((len(code), instr[1]))
-        code.append(None)
-    elif instr[0] == 'print':
-        for ex in instr[1:]:
-            translate_expr(ex, context, code)
-            code.append(('print_' + ex[1], ))
-        code.append(('println',))
-    elif instr[0] == 'end':
-        code.append(('end',))
-    else:
-        assert False, instr
-        
-def translate(context):
-    code = []
-    jmps = []
-
-    jpos = {}
+        jpos = {}
     
-    for ln, instr in enumerate(context.code):
-        jpos[ln] = len(code)
-        translate_instr(instr, context, code, jmps)
-        #code.append(('dbg',))
-    for codepos, label in jmps:
-        code[codepos] = ('jmp', jpos[context.labels[label]])
-    return code
+        for ln, instr in enumerate(ast_context.code):
+            jpos[ln] = len(self.code)
+            self.translate_instr(instr)
+            #code.append(('dbg',))
+        for codepos, label in self.jmps:
+            self.code[codepos] = ('jmp', jpos[ast_context.labels[label]])
+            
+        del self.jmps
+        self.nb_int = ast_ctx.nb_int
+        self.nb_str = ast_ctx.nb_str
+        self.const_int = ast_ctx.const_int
+        self.const_str = ast_ctx.const_str
+        
+        for instr in self.code:
+            assert instr[0] in opnames, instr[0]
+            assert len(instr) == 1 if opcodes[instr[0]] < opcodes['hasarg'] else 2
+            
 
-def execute_trans(context, code):
+    
+    def translate_expr(self, expr):
+        if expr[0] in operations:
+            self.translate_expr(expr[2])
+            self.translate_expr(expr[3])
+            self.code.append((expr[0],))
+        elif expr[0] == 'var':
+            self.code.append(('load_'+expr[1], expr[2]))
+        elif expr[0] == 'cst':
+            self.code.append(('load_const_'+expr[1], expr[2]))
+        else:
+            assert False, expr
+
+        
+    def translate_instr(self, instr):
+        if instr[0] == 'input':
+            self.translate_expr(instr[1])
+            self.code.append(('print_' + instr[1][1], ))
+            self.code.append(('input_' + instr[2], instr[3]))
+        elif instr[0] == 'assign':
+            self.translate_expr(instr[3])
+            self.code.append(('save_' + instr[1], instr[2]))
+        elif instr[0] == 'if':
+            self.translate_expr(instr[1])
+            jmp_instr = len(self.code)
+            self.code.append(None)
+            self.translate_instr(instr[2])
+            self.code[jmp_instr] = ('jmpz', len(self.code))
+        elif instr[0] == 'goto':
+            self.jmps.append((len(self.code), instr[1]))
+            self.code.append(None)
+        elif instr[0] == 'print':
+            for ex in instr[1:]:
+                self.translate_expr(ex)
+                self.code.append(('print_' + ex[1], ))
+            self.code.append(('println',))
+        elif instr[0] == 'end':
+            self.code.append(('end',))
+        else:
+            assert False, instr
+            
+opnames = [
+ 'end',
+ 'add_int',
+ 'sub_int',
+ 'mul_int',
+ 'div_int',
+ 'eq_int',
+ 'cat_str',
+ 'eq_str',
+ 'print_int',
+ 'print_str',
+ 'println',
+ 'hasarg',
+ 'load_const_int',
+ 'load_int',
+ 'input_int',
+ 'save_int',
+ 'load_const_str',
+ 'load_str',
+ 'input_str',
+ 'save_str',
+ 'jmp',
+ 'jmpz'
+ ]
+opcodes = {name:i for i,name in enumerate(opnames)}
+        
+
+def execute_trans(bc_context):
     ip = 0
     istack = []
     sstack = istack # does not need to be seperate in python
@@ -363,10 +421,11 @@ def execute_trans(context, code):
     ipop = istack.pop
     spush = sstack.append
     spop = sstack.pop
-    integers = [0] * context.nb_int
-    strings = [''] * context.nb_str
+    integers = [0] * bc_context.nb_int
+    strings = [''] * bc_context.nb_str
+
     while True:
-        instr = code[ip]
+        instr = bc_context.code[ip]
 
         #print
         #print integers, istack
@@ -380,9 +439,9 @@ def execute_trans(context, code):
             spush(strings[instr[1]])
             
         elif instr[0] == 'load_const_int':
-            ipush(context.const_int[instr[1]])
+            ipush(bc_context.const_int[instr[1]])
         elif instr[0] == 'load_const_str':
-            spush(context.const_str[instr[1]])
+            spush(bc_context.const_str[instr[1]])
 
         elif instr[0] == 'input_int':
             integers[instr[1]] = int(raw_input())
@@ -408,10 +467,10 @@ def execute_trans(context, code):
         elif instr[0] == 'eq_int':
             ipush(ipop() == ipop())
 
-        elif instr[0] == 'add_str':
+        elif instr[0] == 'cat_str':
             spush(spop() + spop())
         elif instr[0] == 'eq_str':
-            spush(spop() + spop())
+            ipush(spop() + spop())
 
         elif instr[0] == 'jmp':
             ip = instr[1]
@@ -429,13 +488,16 @@ def execute_trans(context, code):
             assert False, instr
 
 if __name__ == '__main__':
-    ctx = parse()
+    ast_ctx = parse()
     import pprint
-    pprint.pprint(ctx.code)
-    pprint.pprint(ctx.labels)
-    for i, instr in enumerate(translate(ctx)):
+    pprint.pprint(ast_ctx.code)
+    bc_ctx = BCContext(ast_ctx)
+    for i, instr in enumerate(bc_ctx.code):
         print i, instr
     print
-    #execute(ctx)
-    execute_trans(ctx, translate(ctx))
+    
+    interpreter = ASTInterpreter(ast_ctx)
+    interpreter.execute()
+    
+    execute_trans(bc_ctx)
     
