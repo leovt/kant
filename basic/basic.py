@@ -332,29 +332,26 @@ class BCContext():
             self.translate_instr(instr)
             #code.append(('dbg',))
         for codepos, label in self.jmps:
-            self.code[codepos] = ('jmp', jpos[ast_context.labels[label]])
+            ah, al = divmod(jpos[ast_context.labels[label]], 256)
+            self.code[codepos+1] = al
+            self.code[codepos+2] = ah
             
         del self.jmps
         self.nb_int = ast_ctx.nb_int
         self.nb_str = ast_ctx.nb_str
         self.const_int = ast_ctx.const_int
-        self.const_str = ast_ctx.const_str
-        
-        for instr in self.code:
-            assert instr[0] in opnames, instr[0]
-            assert len(instr) == 1 if opcodes[instr[0]] < opcodes['hasarg'] else 2
-            
+        self.const_str = ast_ctx.const_str            
 
     
     def translate_expr(self, expr):
         if expr[0] in operations:
             self.translate_expr(expr[2])
             self.translate_expr(expr[3])
-            self.code.append((expr[0],))
+            self.emit(expr[0])
         elif expr[0] == 'var':
-            self.code.append(('load_'+expr[1], expr[2]))
+            self.emit('load_'+expr[1], expr[2])
         elif expr[0] == 'cst':
-            self.code.append(('load_const_'+expr[1], expr[2]))
+            self.emit('load_const_'+expr[1], expr[2])
         else:
             assert False, expr
 
@@ -362,29 +359,54 @@ class BCContext():
     def translate_instr(self, instr):
         if instr[0] == 'input':
             self.translate_expr(instr[1])
-            self.code.append(('print_' + instr[1][1], ))
-            self.code.append(('input_' + instr[2], instr[3]))
+            self.emit('print_' + instr[1][1])
+            self.emit('input_' + instr[2], instr[3])
         elif instr[0] == 'assign':
             self.translate_expr(instr[3])
-            self.code.append(('save_' + instr[1], instr[2]))
+            self.emit('save_' + instr[1], instr[2])
         elif instr[0] == 'if':
             self.translate_expr(instr[1])
             jmp_instr = len(self.code)
-            self.code.append(None)
+            self.emit('jmpz', 0xdead)
             self.translate_instr(instr[2])
-            self.code[jmp_instr] = ('jmpz', len(self.code))
+            ah, al = divmod(len(self.code), 256)
+            self.code[jmp_instr+1] = al
+            self.code[jmp_instr+2] = ah
         elif instr[0] == 'goto':
             self.jmps.append((len(self.code), instr[1]))
-            self.code.append(None)
+            self.emit('jmp', 0xdead)
         elif instr[0] == 'print':
             for ex in instr[1:]:
                 self.translate_expr(ex)
-                self.code.append(('print_' + ex[1], ))
-            self.code.append(('println',))
+                self.emit('print_' + ex[1])
+            self.emit('println')
         elif instr[0] == 'end':
-            self.code.append(('end',))
+            self.emit('end')
         else:
             assert False, instr
+            
+    def emit(self, mnemonic, arg=None):
+        self.code.append(opcodes[mnemonic])
+        if arg is not None:
+            ah, al = divmod(arg, 256)
+            self.code.append(al)
+            self.code.append(ah)
+
+    
+    def disassemble(self):
+        ip = 0
+        while ip<len(self.code):
+            bytecode = self.code[ip]
+            mnemonic = opnames[bytecode]
+            ip += 1
+            if bytecode > opcodes['hasarg']:
+                arg = self.code[ip] + 256 * self.code[ip+1]
+                ip += 2
+                print '%3d: %s %d' % (ip, mnemonic, arg)
+            else:
+                print '%3d: %s' % (ip, mnemonic)
+            
+
             
 opnames = [
  'end',
@@ -425,79 +447,82 @@ def execute_trans(bc_context):
     strings = [''] * bc_context.nb_str
 
     while True:
-        instr = bc_context.code[ip]
-
-        #print
-        #print integers, istack
-        #print strings, sstack
-        #print ip, instr
-        
+        bytecode = bc_context.code[ip]
+        mnemonic = opnames[bytecode]
         ip += 1
-        if instr[0] == 'load_int':
-            ipush(integers[instr[1]])
-        elif instr[0] == 'load_str':
-            spush(strings[instr[1]])
+        arg = None
+        if bytecode > opcodes['hasarg']:
+            arg = bc_context.code[ip] + 256 * bc_context.code[ip+1]
+            ip += 2
+        if mnemonic == 'load_int':
+            ipush(integers[arg])
+        elif mnemonic == 'load_str':
+            spush(strings[arg])
             
-        elif instr[0] == 'load_const_int':
-            ipush(bc_context.const_int[instr[1]])
-        elif instr[0] == 'load_const_str':
-            spush(bc_context.const_str[instr[1]])
+        elif mnemonic == 'load_const_int':
+            ipush(bc_context.const_int[arg])
+        elif mnemonic == 'load_const_str':
+            spush(bc_context.const_str[arg])
 
-        elif instr[0] == 'input_int':
-            integers[instr[1]] = int(raw_input())
-        elif instr[0] == 'input_str':
-            strings[instr[1]] = raw_input()
+        elif mnemonic == 'input_int':
+            integers[arg] = int(raw_input())
+        elif mnemonic == 'input_str':
+            strings[arg] = raw_input()
             
-        elif instr[0] == 'save_int':
-            integers[instr[1]] = ipop()
-        elif instr[0] == 'save_str':
-            strings[instr[1]] = spop()
+        elif mnemonic == 'save_int':
+            integers[arg] = ipop()
+        elif mnemonic == 'save_str':
+            strings[arg] = spop()
             
-        elif instr[0] == 'print_str':
+        elif mnemonic == 'print_str':
             print spop(),
-        elif instr[0] == 'print_int':
+        elif mnemonic == 'print_int':
             print ipop(),
-        elif instr[0] == 'println':
+        elif mnemonic == 'println':
             print
 
-        elif instr[0] == 'add_int':
+        elif mnemonic == 'add_int':
             ipush(ipop() + ipop())
-        elif instr[0] == 'sub_int':
+        elif mnemonic == 'sub_int':
             ipush(- ipop() + ipop())
-        elif instr[0] == 'eq_int':
+        elif mnemonic == 'eq_int':
             ipush(ipop() == ipop())
 
-        elif instr[0] == 'cat_str':
+        elif mnemonic == 'cat_str':
             spush(spop() + spop())
-        elif instr[0] == 'eq_str':
+        elif mnemonic == 'eq_str':
             ipush(spop() + spop())
 
-        elif instr[0] == 'jmp':
-            ip = instr[1]
-        elif instr[0] == 'jmpz':
+        elif mnemonic == 'jmp':
+            ip = arg
+        elif mnemonic == 'jmpz':
             if not ipop():
-                ip = instr[1]
+                ip = arg
 
-        elif instr[0] == 'end':
+        elif mnemonic == 'end':
             break
 
-        elif instr[0] == 'dbg':
+        elif mnemonic == 'dbg':
             print len(istack), len(sstack)
 
         else:
             assert False, instr
+
+        
+        
 
 if __name__ == '__main__':
     ast_ctx = parse()
     import pprint
     pprint.pprint(ast_ctx.code)
     bc_ctx = BCContext(ast_ctx)
-    for i, instr in enumerate(bc_ctx.code):
-        print i, instr
-    print
     
     interpreter = ASTInterpreter(ast_ctx)
-    interpreter.execute()
+    #interpreter.execute()
+    
+    print bc_ctx.code
+    bc_ctx.disassemble()
+    
     
     execute_trans(bc_ctx)
     
