@@ -1,3 +1,5 @@
+import struct
+
 src = '''
 10 DIM I AS INTEGER
 20 DIM NAME AS STRING
@@ -321,7 +323,9 @@ class ASTInterpreter:
 
 
 class BCContext():
-    def __init__(self, ast_context):
+    @classmethod
+    def fromast(cls, ast_context):
+        self = cls()
         self.code = []
         self.jmps = []
 
@@ -340,7 +344,8 @@ class BCContext():
         self.nb_int = ast_ctx.nb_int
         self.nb_str = ast_ctx.nb_str
         self.const_int = ast_ctx.const_int
-        self.const_str = ast_ctx.const_str            
+        self.const_str = ast_ctx.const_str        
+        return self    
 
     
     def translate_expr(self, expr):
@@ -405,8 +410,31 @@ class BCContext():
                 print '%3d: %s %d' % (ip, mnemonic, arg)
             else:
                 print '%3d: %s' % (ip, mnemonic)
+                
+    def serialize(self, outfile):
+        outfile.write(struct.pack('HHHHH', len(self.code), self.nb_int, self.nb_str, len(self.const_int), len(self.const_str)))
+        for i in self.const_int:
+            outfile.write(struct.pack('l', i))
+        for s in self.const_str:
+            outfile.write(struct.pack('L', len(s)))
+            outfile.write(s)
+        for c in self.code:
+            outfile.write(struct.pack('B', c))
             
-
+    @classmethod
+    def fromfile(cls, infile):
+        self = cls()
+        code_length, self.nb_int, self.nb_str, nb_const_int, nb_const_str = struct.unpack('HHHHH', infile.read(10))
+        self.const_int = [
+            struct.unpack('l', infile.read(4))[0] for _ in xrange(nb_const_int)]
+        self.const_str = []
+        for _ in xrange(nb_const_str):
+            length = struct.unpack('L', infile.read(4))[0]
+            self.const_str.append(infile.read(length))
+        self.code = []
+        for _ in xrange(code_length):
+            self.code.append(struct.unpack('B', infile.read(1))[0])
+        return self
             
 opnames = [
  'end',
@@ -515,7 +543,7 @@ if __name__ == '__main__':
     ast_ctx = parse()
     import pprint
     pprint.pprint(ast_ctx.code)
-    bc_ctx = BCContext(ast_ctx)
+    bc_ctx = BCContext.fromast(ast_ctx)
     
     interpreter = ASTInterpreter(ast_ctx)
     #interpreter.execute()
@@ -523,6 +551,11 @@ if __name__ == '__main__':
     print bc_ctx.code
     bc_ctx.disassemble()
     
+    with open('test.bac', 'wb') as outfile:
+        bc_ctx.serialize(outfile)
+        
+    with open('test.bac', 'rb') as infile:
+        bc_ctx = BCContext.fromfile(infile)
     
     execute_trans(bc_ctx)
     
