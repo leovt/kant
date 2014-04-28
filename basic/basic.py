@@ -9,9 +9,12 @@ src = '''
 60 IF I = 0 THEN GOTO 90
 70 PRINT "HELLO," ; NAME ; I
 80 GOTO 50
-90 NAME = NAME + ""
+90 NAME = NAME + "E"
 95 I = I = 1
-96 I = NAME = "NAME"
+96 PRINT "SHOULD BE ZERO"; I
+97 I = NAME = "NAME"
+98 PRINT I; NAME
+99 PRINT "" = ""
 100 END
 '''
 
@@ -461,7 +464,15 @@ opnames = [
  'jmpz'
  ]
 opcodes = {name:i for i,name in enumerate(opnames)}
-        
+     
+with open('opcodes.h', 'w') as f:
+    f.write('static const char* opnames[] = {\n' + 
+            ',\n'.join('"%s"' % name for name in opnames) + 
+            '\n};\n')
+    f.write('enum opcodes{')
+    for i, name in enumerate(opnames):
+        f.write('    op_%s = %d,\n' % (name, i))
+    f.write('};\n')
 
 def execute_trans(bc_context):
     ip = 0
@@ -510,16 +521,21 @@ def execute_trans(bc_context):
             print
 
         elif mnemonic == 'add_int':
-            ipush(ipop() + ipop())
+            tmp = ipop()
+            ipush(ipop() + tmp)
+            
         elif mnemonic == 'sub_int':
-            ipush(- ipop() + ipop())
+            tmp = ipop()
+            ipush(ipop() - tmp)
+            
         elif mnemonic == 'eq_int':
-            ipush(ipop() == ipop())
+            ipush(int(ipop() == ipop()))
 
         elif mnemonic == 'cat_str':
-            spush(spop() + spop())
+            tmp = spop()
+            spush(spop() + tmp)
         elif mnemonic == 'eq_str':
-            ipush(spop() + spop())
+            ipush(int(spop() == spop()))
 
         elif mnemonic == 'jmp':
             ip = arg
@@ -542,14 +558,14 @@ def execute_trans(bc_context):
 if __name__ == '__main__':
     ast_ctx = parse()
     import pprint
-    pprint.pprint(ast_ctx.code)
+    #pprint.pprint(ast_ctx.code)
     bc_ctx = BCContext.fromast(ast_ctx)
     
     interpreter = ASTInterpreter(ast_ctx)
     #interpreter.execute()
     
-    print bc_ctx.code
-    bc_ctx.disassemble()
+    #print bc_ctx.code
+    #bc_ctx.disassemble()
     
     with open('test.bac', 'wb') as outfile:
         bc_ctx.serialize(outfile)
