@@ -206,6 +206,8 @@ def expr(tokens, lineno, context):
                 a = result.pop()
                 result.append(operation(s, a, b))
                 s = stack.pop()
+        elif t == '\n':
+            break
         else:
             assert False
     while stack:
@@ -250,8 +252,8 @@ def parse():
     for line in src.splitlines():
         if not line.endswith('\n'):
             line += '\n'
-        tokens = [t for t in scanner.scan(line) if t.type not in ('whitespace', 'end_of_line')]
-        if not tokens:
+        tokens = [t for t in scanner.scan(line) if t.type != 'whitespace']
+        if tokens[0].type == 'end_of_line':
             continue
         if tokens[0].type != 'integer':
             error('line must start with an integer line number')
