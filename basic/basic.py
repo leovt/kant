@@ -85,8 +85,6 @@ def tokenize(line):
         assert False
 
 def stmt(tokens, lineno, context):
-    expr_tok = [t.text for t in tokens] #TODO: rewrite expr instead of this line 
-
     if tokens[0].type == 'DIM':
         if tokens[1].type != 'identifier':
             error('line %d identifier expected' % (lineno, ))
@@ -102,39 +100,49 @@ def stmt(tokens, lineno, context):
             v_type = 'str'
         else:
             error('line %d: unknown type %s' %( lineno, tokens[3]))
+        if tokens[4].type != 'end_of_line':
+            error('expecting end of line')
         context.symbols[tokens[1].text] = v_type, v_id
         return ()
 
     elif tokens[0].type == 'INPUT':
-        t = expr_tok.index(';') #TODO: rewrite expr
-        expression = expr(expr_tok[1:t], lineno, context)
+        expression, t = expr(tokens, 1, lineno, context)
+        if tokens[t].type != ';':
+            error('INPUT expecting ; after message')
         if tokens[t+1].type != 'identifier':
             error('INPUT expecting variable name after ";"')
         if tokens[t+1].text not in context.symbols:
             error('Undefined variable %r for INPUT' % tokens[t+1].text)
+        if tokens[t+2].type != 'end_of_line':
+            error('expecting end of line')
         v_type, v_id = context.symbols[tokens[t+1].text]
         return ('input', expression, v_type, v_id)
 
     elif tokens[0].type == 'IF':
-        t = expr_tok.index('THEN')
-        cond = expr(expr_tok[1:t], lineno, context)
+        cond, t = expr(tokens, 1, lineno, context)
+        if tokens[t].type != 'THEN':
+            error('IF expecting THEN after the condition expression')
         return ('if', cond, stmt(tokens[t+1:], lineno, context))
 
     elif tokens[0].type == 'PRINT':
-        rest = expr_tok[1:]
         result = ['print']
-        while rest:
-            if ';' in rest:
-                t = rest.index(';')
+        pos = 1
+        while True:
+            expression, pos = expr(tokens, pos, lineno, context)
+            result.append(expression)
+            if tokens[pos].type == ';':
+                pos += 1
+            elif tokens[pos].type == 'end_of_line':
+                break
             else:
-                t = len(rest)
-            result.append(expr(rest[:t], lineno, context))
-            rest = rest[t+1:]
+                error('PRINT expecting expressions separated by ";"')
         return tuple(result)
 
     elif tokens[0].type == 'GOTO':
         if tokens[1].type != 'integer':
             error('GOTO: expecting integer line number.')
+        if tokens[2].type != 'end_of_line':
+            error('expecting end of line')
         return ('goto', int(tokens[1].text))
 
     elif tokens[0].type == 'END':
@@ -148,12 +156,15 @@ def stmt(tokens, lineno, context):
         v_type, v_id = context.symbols[tokens[1].text]
         if tokens[2].type != 'operator' or tokens[2].text != '=':
             error('LET expected = sign for assignment')
-        return ('assign', v_type, v_id, expr(expr_tok[3:], lineno, context))
+        expression, pos = expr(tokens, 3, lineno, context)
+        if tokens[pos].type != 'end_of_line':
+            error('expecting end of line')
+        return ('assign', v_type, v_id, expression)
 
     else:
         error('unrecognized statement %s on line %d' % (' '.join(tokens), lineno))
 
-def expr(tokens, lineno, context):
+def expr(tokens, position, lineno, context):
     symbols = context.symbols
     result = []
     stack = []
@@ -173,52 +184,56 @@ def expr(tokens, lineno, context):
                ('str', '+', 'str'): ('str', 'cat_str'),
                ('int', '=', 'int'): ('int', 'eq_int'),
                ('str', '=', 'str'): ('int', 'eq_str')}
-        type_r, typed_op = ops.get((type_a, op, type_b), None)
+        type_r, typed_op = ops.get((type_a, op, type_b), (None, None))
         if type_r is None:
             error('invalid use of operator types %s %s %s on line %d' % (type_a, op, type_b, lineno))
         else:
             return (typed_op, type_r, a, b)
 
-    for t in tokens:
-        if t.isdigit():
-            result.append(('cst', 'int', context.add_const('int', int(t))))
-        elif t[0] == '"':
-            assert t[-1] == '"'
-            result.append(('cst', 'str', context.add_const('str', t[1:-1].replace('""', '"'))))
-        elif t.isalpha():
-            if t in symbols:
-                v_type, v_id = symbols[t]
+    while tokens[position].type not in (';', 'THEN', 'end_of_line'):
+        t = tokens[position]
+        if t.type == 'integer':
+            result.append(('cst', 'int', context.add_const('int', int(t.text))))
+        elif t.type == 'string':
+            assert t.text[-1] == '"'
+            result.append(('cst', 'str', context.add_const('str', t.text[1:-1].replace('""', '"'))))
+        elif t.type == 'identifier':
+            if t.text in symbols:
+                v_type, v_id = symbols[t.text]
+            else:
+                error('Undefined variable %r' % t.text)
             result.append(('var', v_type, v_id))
-        elif t in '+-*/=':
-            while stack and op[stack[-1]] > op[t]:
+        elif t.type == 'operator':
+            while stack and op[stack[-1]] > op[t.text]:
                 s = stack.pop()
                 b = result.pop()
                 a = result.pop()
                 
                 result.append(operation(s, a, b))
-            stack.append(t)
-        elif t == '(':
-            stack.push(t)
-        elif t == ')':
+            stack.append(t.text)
+        elif t.type == '(':
+            stack.push('(')
+        elif t.type == ')':
             s = stack.pop()
             while s != '(':
                 b = result.pop()
                 a = result.pop()
                 result.append(operation(s, a, b))
                 s = stack.pop()
-        elif t == '\n':
-            break
         else:
-            assert False
+            error('invalid token in expression %r' % t.text)
+        position = position + 1
+        
     while stack:
         s = stack.pop()
         b = result.pop()
         a = result.pop()
         result.append(operation(s, a, b))
 
-    assert len(result) == 1
+    if len(result) != 1:
+        error('incomplete expression')
 
-    return result.pop()
+    return result.pop(), position
 
 class ASTContext:
     def __init__(self):
