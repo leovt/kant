@@ -2,7 +2,7 @@ from collections import namedtuple
 
 keywords = ['DIM', 'AS', 'INTEGER', 'STRING', 'INPUT', 'IF', 'THEN', 'GOTO', 'PRINT', 'END', 'FLOAT', 'LET']
 
-Token = namedtuple('Token', 'type, start, end, message')
+Token = namedtuple('Token', 'type, start, end, text')
 
 def scan(source):
     pos = 0
@@ -21,13 +21,13 @@ def anytoken(pos, source):
     elif source[pos] == '"':
         return string(pos, pos+1, source)
     elif source[pos] == '\n':
-        return Token('end_of_line', pos, pos+1, '')
+        return Token('end_of_line', pos, pos+1, '\n')
     elif source[pos] in ' \t':
         return whitespace(pos, pos+1, source)
     elif source[pos] in '+-*/=<>':
-        return Token('operator', pos, pos+1, '')
+        return Token('operator', pos, pos+1, source[pos])
     elif source[pos] in '();:':
-        return Token(source[pos], pos, pos+1, '')
+        return Token(source[pos], pos, pos+1, source[pos])
     else:
         return Token('error', pos, pos+1, 'illegal character')
         
@@ -39,7 +39,7 @@ def number(start, pos, source):
     elif source[pos] == 'E':
         return e_number(start, pos+1, source)
     else:
-        return Token('integer', start, pos, '')
+        return Token('integer', start, pos, source[start:pos])
 
 def decimal_point(start, pos, source):
     if source[pos] in '0123456789':
@@ -53,7 +53,7 @@ def decimal_number(start, pos, source):
     if source[pos] == 'E':
         return e_number(start, pos+1, source)
     else:
-        return Token('float', start, pos, '')
+        return Token('float', start, pos, source[start:pos])
     
 def e_number(start, pos, source):
     if source[pos] in '+-':
@@ -67,15 +67,15 @@ def e_number(start, pos, source):
 def exponent_number(start, pos, source):
     while source[pos] in '0123456789':
         pos += 1
-    return Token('float', start, pos, '')
+    return Token('float', start, pos, source[start:pos])
         
 def identifier_or_keyword(start, pos, source):
     while source[pos] in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789':
         pos += 1
     if source[start:pos] in keywords:
-        return Token(source[start:pos], start, pos, '')
+        return Token(source[start:pos], start, pos, source[start:pos])
     else:
-        return Token('identifier', start, pos, '')
+        return Token('identifier', start, pos, source[start:pos])
     
 def string(start, pos, source):
     while source[pos] not in '\n"':
@@ -91,12 +91,12 @@ def string_quote(start, pos, source):
     if source[pos] == '"':
         return string(start, pos+1, source)
     else:
-        return Token('string', start, pos, '')
+        return Token('string', start, pos, source[start:pos])
     
 def whitespace(start, pos, source):
     while source[pos] in ' \t':
         pos += 1
-    return Token('whitespace', start, pos, '')
+    return Token('whitespace', start, pos, source[start:pos])
     
 def test_numbers():
     token = anytoken(0, '1\n')
