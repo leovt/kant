@@ -85,34 +85,43 @@ def tokenize(line):
         assert False
 
 def stmt(tokens, lineno, context):
-    if tokens[0] == 'DIM':
-        if tokens[2] != 'AS':
+    expr_tok = [t.text for t in tokens] #TODO: rewrite expr instead of this line 
+
+    if tokens[0].type == 'DIM':
+        if tokens[1].type != 'identifier':
+            error('line %d identifier expected' % (lineno, ))
+        if tokens[2].type != 'AS':
             error('line %d "AS" expected' % (lineno, ))
-        var = variable(tokens[1], lineno)
-        v_type = types[tokens[3]]
-        if tokens[3] == 'INTEGER':
+        if tokens[3].type == 'INTEGER':
             v_id = context.nb_int
             context.nb_int += 1
-        elif tokens[3] == 'STRING':
+            v_type = 'int'
+        elif tokens[3].type == 'STRING':
             v_id = context.nb_str
             context.nb_str += 1
+            v_type = 'str'
         else:
             error('line %d: unknown type %s' %( lineno, tokens[3]))
-        context.symbols[var] = v_type, v_id
+        context.symbols[tokens[1].text] = v_type, v_id
         return ()
 
-    elif tokens[0] == 'INPUT':
-        t = tokens.index(';')
-        v_type, v_id = context.symbols[variable(tokens[t+1], lineno)]
-        return ('input', expr(tokens[1:t], lineno, context), v_type, v_id)
+    elif tokens[0].type == 'INPUT':
+        t = expr_tok.index(';') #TODO: rewrite expr
+        expression = expr(expr_tok[1:t], lineno, context)
+        if tokens[t+1].type != 'identifier':
+            error('INPUT expecting variable name after ";"')
+        if tokens[t+1].text not in context.symbols:
+            error('Undefined variable %r for INPUT' % tokens[t+1].text)
+        v_type, v_id = context.symbols[tokens[t+1].text]
+        return ('input', expression, v_type, v_id)
 
-    elif tokens[0] == 'IF':
-        t = tokens.index('THEN')
-        cond = expr(tokens[1:t], lineno, context)
+    elif tokens[0].type == 'IF':
+        t = expr_tok.index('THEN')
+        cond = expr(expr_tok[1:t], lineno, context)
         return ('if', cond, stmt(tokens[t+1:], lineno, context))
 
-    elif tokens[0] == 'PRINT':
-        rest = tokens[1:]
+    elif tokens[0].type == 'PRINT':
+        rest = expr_tok[1:]
         result = ['print']
         while rest:
             if ';' in rest:
@@ -123,17 +132,23 @@ def stmt(tokens, lineno, context):
             rest = rest[t+1:]
         return tuple(result)
 
-    elif tokens[0] == 'GOTO':
-        return ('goto', int(tokens[1]))
+    elif tokens[0].type == 'GOTO':
+        if tokens[1].type != 'integer':
+            error('GOTO: expecting integer line number.')
+        return ('goto', int(tokens[1].text))
 
-    elif tokens[0] == 'END':
+    elif tokens[0].type == 'END':
         return ('end',)
 
-    elif tokens[0] == 'LET':
-        v_type, v_id = context.symbols[variable(tokens[1], lineno)]
-        if tokens[2] != '=':
+    elif tokens[0].type == 'LET':
+        if tokens[1].type != 'identifier':
+            error('LET expecting a variable name')
+        if tokens[1].text not in context.symbols:
+            error('Assigning to undefined variable %r' % tokens[1].text)
+        v_type, v_id = context.symbols[tokens[1].text]
+        if tokens[2].type != 'operator' or tokens[2].text != '=':
             error('LET expected = sign for assignment')
-        return ('assign', v_type, v_id, expr(tokens[3:], lineno, context))
+        return ('assign', v_type, v_id, expr(expr_tok[3:], lineno, context))
 
     else:
         error('unrecognized statement %s on line %d' % (' '.join(tokens), lineno))
@@ -244,7 +259,7 @@ def parse():
         if lineno <= lastno:
             error('line numbers not strictly increasing: %d follows %d' % (lineno, lastno))
         context.labels[lineno] = len(context.code)
-        statement = stmt([t.text for t in tokens[1:]], lineno, context)
+        statement = stmt(tokens[1:], lineno, context)
         if statement:
             context.code.append(statement)
         lastno = lineno
