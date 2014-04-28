@@ -1,4 +1,5 @@
 import struct
+import scanner
 
 src = '''
 10 DIM I AS INTEGER
@@ -230,19 +231,21 @@ def parse():
     symbols = {}
 
     for line in src.splitlines():
-        tokens = [t for t in tokenize(line) if t.strip()]
+        if not line.endswith('\n'):
+            line += '\n'
+        tokens = [t for t in scanner.scan(line) if t.type not in ('whitespace', 'end_of_line')]
         if not tokens:
             continue
-        lineno = int(tokens[0])
+        if tokens[0].type != 'integer':
+            error('line must start with an integer line number')
+        lineno = int(tokens[0].text)
         if lineno <= lastno:
             error('line numbers not strictly increasing: %d follows %d' % (lineno, lastno))
         context.labels[lineno] = len(context.code)
-        statement = stmt(tokens[1:], lineno, context)
+        statement = stmt([t.text for t in tokens[1:]], lineno, context)
         if statement:
             context.code.append(statement)
-
         lastno = lineno
-
     return context
 
 from operator import add, sub, mul, div, eq
