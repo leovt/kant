@@ -195,7 +195,7 @@ class ASTContext:
             return len(array) -1
         
 
-def parse():
+def parse(lines):
     context = ASTContext()
 
     lastno = 0
@@ -203,7 +203,7 @@ def parse():
     from itertools import count
     symbols = {}
 
-    for line in src.splitlines():
+    for line in lines:
         if not line.endswith('\n'):
             line += '\n'
         tokens = [t for t in scanner.scan(line) if t.type != 'whitespace']
@@ -532,7 +532,7 @@ def execute_trans(bc_context):
         
 
 if __name__ == '__main__':
-    ast_ctx = parse()
+    ast_ctx = parse(src)
     import pprint
     #pprint.pprint(ast_ctx.code)
     bc_ctx = BCContext.fromast(ast_ctx)
