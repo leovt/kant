@@ -19,70 +19,9 @@ src = '''
 100 END
 '''
 
-keywords = ['DIM', 'AS', 'INTEGER', 'STRING', 'INPUT', 'IF', 'THEN', 'GOTO', 'PRINT', 'END']
-types = {'INTEGER': 'int', 'STRING': 'str'}
-
-
-
 def error(msg):
     print msg
     raise Exception(msg)
-
-def variable(x, lineno):
-    x = x.upper()
-    if not x.isalpha() or x in keywords:
-        error('line %d: expected a variable name instead of %s' % (lineno, x))
-    return x
-
-def tokenize(line):
-    state = ''
-    start = 0
-    for i, c in enumerate(line):
-        if state == '':
-            if c == '"':
-                state = '"'
-                yield line[start:i]
-                start = i
-            elif c in (' ', '\t'):
-                state = ' '
-                yield line[start:i]
-            elif c in ';+-*/=()':
-                state = ' '
-                yield line[start:i]
-                yield c
-        elif state == '"':
-            if c == '"':
-                state = '""'
-        elif state == '""':
-            if c == '"':
-                state = '"'
-            else:
-                state = ''
-                yield line[start:i]
-                start = i
-        elif state == ' ':
-            if c == '"':
-                state = '"'
-                start = i
-            elif c in (' ', '\t'):
-                pass
-            elif c in ';+-*/=()':
-                yield c
-            else:
-                state = ''
-                start = i
-        else:
-            assert False
-    if state == '':
-        yield line[start:]
-    elif state == '"':
-        error('unmatched "', 0)
-    elif state == '""':
-        yield line[start:]
-    elif state == ' ':
-        pass
-    else:
-        assert False
 
 def stmt(tokens, lineno, context):
     if tokens[0].type == 'DIM':
