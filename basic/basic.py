@@ -1,25 +1,8 @@
 import struct
 import parser
-
-src = '''
-10 DIM I AS INTEGER
-20 DIM NAME AS STRING
-30 INPUT "WHATS YOUR NAME? " ; NAME
-40 INPUT "WHATS YOUR AGE? " ; I
-50 LET I = I - 1
-60 IF I = 0 THEN GOTO 90
-70 PRINT "HELLO," ; NAME ; I
-80 GOTO 50
-90 LET NAME = NAME + "E"
-95 LET I = I = 1
-96 PRINT "SHOULD BE ZERO"; I
-97 LET I = NAME = "NAME"
-98 PRINT I; NAME
-99 PRINT "" = ""
-100 END
-'''
-
 from operator import add, sub, mul, div, eq
+import subprocess
+import asmw
 
 operations = {
     'add_int': add,
@@ -330,12 +313,25 @@ def execute_trans(bc_context):
         
 
 if __name__ == '__main__':
-    ast_ctx = parser.parse(src.splitlines())
-    import pprint
-    #pprint.pprint(ast_ctx.code)
-    bc_ctx = BCContext.fromast(ast_ctx)
+    with open('test.bas', 'r') as infile:
+        ast_ctx = parser.parse(infile)
+        
+    import tac
     
-    interpreter = ASTInterpreter(ast_ctx)
+    tac_ctx = tac.TAC.fromast(ast_ctx)
+    
+    import pprint
+    
+    pprint.pprint(tac_ctx.code)
+    #tac_ctx.interpreter()
+    asm = asmw.GASM('test.s')
+    tac_ctx.compile(asm)
+    asm.close()
+    #pprint.pprint(ast_ctx.code)
+    subprocess.call(['gcc', 'test.s', 'lib.c', '-o', 'test'])
+    subprocess.call(['test'])
+    bc_ctx = BCContext.fromast(ast_ctx)
+    #interpreter = ASTInterpreter(ast_ctx)
     #interpreter.execute()
     
     #print bc_ctx.code
