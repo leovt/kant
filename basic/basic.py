@@ -172,28 +172,28 @@ class BCContext():
                 print '%3d: %s' % (ip, mnemonic)
                 
     def serialize(self, outfile):
-        outfile.write(struct.pack('HHHHH', len(self.code), self.nb_int, self.nb_str, len(self.const_int), len(self.const_str)))
+        outfile.write(struct.pack('<HHHHH', len(self.code), self.nb_int, self.nb_str, len(self.const_int), len(self.const_str)))
         for i in self.const_int:
-            outfile.write(struct.pack('l', i))
+            outfile.write(struct.pack('<l', i))
         for s in self.const_str:
-            outfile.write(struct.pack('L', len(s)))
+            outfile.write(struct.pack('<L', len(s)))
             outfile.write(s)
         for c in self.code:
-            outfile.write(struct.pack('B', c))
+            outfile.write(struct.pack('<B', c))
             
     @classmethod
     def fromfile(cls, infile):
         self = cls()
-        code_length, self.nb_int, self.nb_str, nb_const_int, nb_const_str = struct.unpack('HHHHH', infile.read(10))
+        code_length, self.nb_int, self.nb_str, nb_const_int, nb_const_str = struct.unpack('<HHHHH', infile.read(10))
         self.const_int = [
-            struct.unpack('l', infile.read(4))[0] for _ in xrange(nb_const_int)]
+            struct.unpack('<l', infile.read(4))[0] for _ in xrange(nb_const_int)]
         self.const_str = []
         for _ in xrange(nb_const_str):
-            length = struct.unpack('L', infile.read(4))[0]
+            length = struct.unpack('<L', infile.read(4))[0]
             self.const_str.append(infile.read(length))
         self.code = []
         for _ in xrange(code_length):
-            self.code.append(struct.unpack('B', infile.read(1))[0])
+            self.code.append(struct.unpack('<B', infile.read(1))[0])
         return self
             
 opnames = [
@@ -328,8 +328,9 @@ if __name__ == '__main__':
     tac_ctx.compile(asm)
     asm.close()
     #pprint.pprint(ast_ctx.code)
-    subprocess.call(['gcc', 'test.s', 'lib.c', '-o', 'test'])
-    subprocess.call(['test'])
+    subprocess.call(['gcc', '-m32', 'test.s', 'lib.c', '-o', 'test'])
+    subprocess.call(['test'], executable='./test')
+    
     bc_ctx = BCContext.fromast(ast_ctx)
     #interpreter = ASTInterpreter(ast_ctx)
     #interpreter.execute()
