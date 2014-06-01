@@ -1,8 +1,7 @@
+'''This module implements the three-adress-code intermediate representation'''
+
 import sys
-import asmw
-import subprocess
 import itertools
-from collections import namedtuple
 
 operations = {
     'add_int',
@@ -13,68 +12,32 @@ operations = {
     'eq_str',
     'cat_str'}
 
-Instr = namedtuple('TACInstr', 'instr,dst,op1,op2,comment')
-
-symbol = ('tmp%d' % i for i in itertools.count(1))  
-consts = ('const%d' % i for i in itertools.count(1))  
-label = ('label%d' % i for i in itertools.count(1))  
-
 class TAC:
     def __init__(self):
-        self.code = [
-    # dim name as string
-    # dim n as integer
-    # input "what's your name? "; name
-    ('prints', 'C0'),
-    ('inputs', 'name'),
-    # input "number of greetings? "; n
-    ('prints', 'C1'),
-    ('inputi', 'n'),
-    # line 50
-    # if n == 0 then goto 90
-    ('label', 'line_50'),
-    ('eq_int', 'tmp0', 'n', 'C4'),
-    ('jmpT', 'line_90', 'tmp0'),
-    # n = n - 1
-    ('sub_int', 'n', 'n', 'C5'),
-    # print "hello, "; name
-    ('prints', 'C2'),
-    ('prints', 'name'),
-    ('prints', 'C3'),
-    # goto 50
-    ('jmp', 'line_50'),
-    #line 90
-    ('label', 'line_90'),
-    ('end',)
-]
-    
-        self.consts = {
-    'C0': "what's your name? ",
-    'C1': "number of greetings? ",
-    'C2': "hello, ",
-    'C3': "\n",
-    'C4': 0,
-    'C5': 1,
-}
-    
-    @classmethod
-    def fromast(cls, ast_context):
-        self = cls()
         self.code = []
         self.consts = {}
+        self.gen_temp_symbol = ('tmp%d' % i for i in itertools.count(1))
+        self.gen_const_symbol = ('const%d' % i for i in itertools.count(1))
+        self.gen_label = ('label%d' % i for i in itertools.count(1))
+
+    @classmethod
+    def fromast(cls, ast_context):
+        '''create a TAC representation of the AST given'''
+        self = cls()
         self.consts.update(('const_int_%d' % i, v) for i,v in enumerate(ast_context.const_int))
         self.consts.update(('const_str_%d' % i, v) for i,v in enumerate(ast_context.const_str))
         self.consts['newline'] = "\n"
-    
+
         lines = {value:key for key,value in ast_context.labels.items()}
-    
+
         for ln, instr in enumerate(ast_context.code):
             if ln in lines:
                 self.code.append(('label', 'line%d' % lines[ln]))
             self.translate_instr(instr)
         return self
-        
+
     def translate_instr(self, instr):
+        '''translate an AST instruction into TAC'''
         if instr[0] == 'input':
             prompt = self.translate_expr(instr[1])
             self.code.append(('print' + instr[1][1][0], prompt))
@@ -83,7 +46,7 @@ class TAC:
             self.translate_expr(instr[3], 'var_%s_%d' % (instr[1], instr[2]))
         elif instr[0] == 'if':
             cond = self.translate_expr(instr[1])
-            endif = next(label)
+            endif = next(self.gen_label)
             self.code.append(('jmpz', endif, cond))
             self.translate_instr(instr[2])
             self.code.append(('label', endif))
@@ -100,11 +63,12 @@ class TAC:
             assert False, instr
 
     def translate_expr(self, expr, name=None):
+        '''translate an expression AST into TAC'''
         if expr[0] in operations:
             op1 = self.translate_expr(expr[2])
             op2 = self.translate_expr(expr[3])
             if name is None:
-                name = next(symbol)
+                name = next(self.gen_temp_symbol)
             self.code.append((expr[0], name, op1, op2))
             return name
         elif expr[0] == 'var':
@@ -113,9 +77,9 @@ class TAC:
             return 'const_%s_%d' % (expr[1], expr[2])
         else:
             assert False, expr
-        
 
     def interpreter(self):
+        '''an interpreter for the TAC'''
         labels = { line[1]:index for index, line in enumerate(self.code) if line[0] == 'label' }
         symbols = dict(self.consts)
         pc = 0
@@ -155,6 +119,9 @@ class TAC:
                 assert False, line
 
     def compile(self, asm):
+        '''compile the TAC to x86 assemply language.
+        
+        the assembly output is written by an ASM class which knows about assembler syntax'''
         str_ref = set()
         int_var = set()
     
@@ -298,12 +265,4 @@ class TAC:
         asm.ret()
         asm.epilogue()
 
-
-
-asm = asmw.GASM('test.s')
-tac = TAC()
-tac.compile(asm)
-asm.close()
-#tac.interpreter()
-subprocess.call(['gcc', 'test.s', 'lib.c', '-o', 'test'])
 
