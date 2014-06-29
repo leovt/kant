@@ -25,9 +25,6 @@ def parse(lines):
 
     lastno = 0
     
-    from itertools import count
-    symbols = {}
-
     for line in lines:
         if not line.endswith('\n'):
             line += '\n'
@@ -178,7 +175,7 @@ def expr(tokens, position, lineno, context):
                 result.append(operation(s, a, b))
             stack.append(t.text)
         elif t.type == '(':
-            stack.push('(')
+            stack.append('(')
         elif t.type == ')':
             s = stack.pop()
             while s != '(':
