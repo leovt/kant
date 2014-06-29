@@ -35,13 +35,20 @@ class TAC:
                 self.code.append(('label', 'line%d' % lines[ln]))
             self.translate_instr(instr)
         return self
+    
+    def dump(self):
+        for name, value in self.consts.items():
+            print '%s = %r' % (name, value)
+        print
+        for number, line in enumerate(self.code):
+            print '\t'.join([str(number)] + [str(item) for item in line])
 
     def translate_instr(self, instr):
         '''translate an AST instruction into TAC'''
         if instr[0] == 'input':
             prompt = self.translate_expr(instr[1])
-            self.code.append(('print' + instr[1][1][0], prompt))
-            self.code.append(('input' + instr[2][0], 'var_%s_%d' % (instr[2], instr[3])))
+            self.code.append(('libcall', 1, None, 'print' + instr[1][1][0], prompt))
+            self.code.append(('libcall', 0, 'var_%s_%d' % (instr[2], instr[3]), 'input' + instr[2][0]))
         elif instr[0] == 'assign':
             self.translate_expr(instr[3], 'var_%s_%d' % (instr[1], instr[2]))
         elif instr[0] == 'if':
@@ -55,8 +62,8 @@ class TAC:
         elif instr[0] == 'print':
             for ex in instr[1:]:
                 sym = self.translate_expr(ex)
-                self.code.append(('print' + ex[1][0], sym))
-            self.code.append(('prints', 'newline'))
+                self.code.append(('libcall', 1, None, 'print' + ex[1][0], sym))
+            self.code.append(('libcall', 1, None, 'prints', 'newline'))
         elif instr[0] == 'end':
             self.code.append(('end',))
         else:
@@ -64,7 +71,14 @@ class TAC:
 
     def translate_expr(self, expr, name=None):
         '''translate an expression AST into TAC'''
-        if expr[0] in operations:
+        if expr[0] in ('eq_str', 'cat_str'):
+            op1 = self.translate_expr(expr[2])
+            op2 = self.translate_expr(expr[3])
+            if name is None:
+                name = next(self.gen_temp_symbol)
+            self.code.append(('libcall', 2, name, expr[0], op1, op2))
+            return name
+        elif expr[0] in operations:
             op1 = self.translate_expr(expr[2])
             op2 = self.translate_expr(expr[3])
             if name is None:
@@ -83,18 +97,26 @@ class TAC:
         labels = { line[1]:index for index, line in enumerate(self.code) if line[0] == 'label' }
         symbols = dict(self.consts)
         pc = 0
+        
+        lib = {
+            'prints': sys.stdout.write,
+            'printi': lambda i: sys.stdout.write(str(i)),
+            'inputs': raw_input,
+            'inputi': lambda: int(raw_input()),
+            'cat_str': lambda a,b: a+b,
+            'eq_str': lambda a,b: int(a==b)}
+        
         while True:
             line = self.code[pc]
             #print pc, line, symbols
             pc += 1
-            if line[0] == 'prints':
-                sys.stdout.write(symbols[line[1]])
-            elif line[0] == 'inputs':
-                symbols[line[1]] = raw_input()
-            elif line[0] == 'printi':
-                sys.stdout.write(str(symbols[line[1]]))
-            elif line[0] == 'inputi':
-                symbols[line[1]] = int(raw_input())
+            if line[0] == 'libcall':
+                nb_arg = line[1]
+                ret_var = line[2]
+                libfunc = line[3]
+                args = [symbols[x] for x in line[4:4+nb_arg]]
+                ret = lib[libfunc](*args)
+                symbols[ret_var] = ret
             elif line[0] == 'eq_int':
                 symbols[line[1]] = int(symbols[line[2]] == symbols[line[3]])
             elif line[0] == 'sub_int':
@@ -122,40 +144,26 @@ class TAC:
         '''compile the TAC to x86 assemply language.
         
         the assembly output is written by an ASM class which knows about assembler syntax'''
-        str_ref = set()
-        int_var = set()
-    
+
+        symbols = set()
+
         for sym, val in self.consts.items():
-            if isinstance(val, str):
-                str_ref.add(sym)
-            else:
-                int_var.add(sym)
+            symbols.add(sym)
     
         for line in self.code:
-            if line[0] == 'prints':
-                assert line[1] in str_ref
-            elif line[0] == 'inputs':
-                str_ref.add(line[1])
-            elif line[0] == 'printi':
-                assert line[1] in int_var
-            elif line[0] == 'inputi':
-                int_var.add(line[1])
-            elif line[0] in ('add_int', 'sub_int', 'eq_int'):
-                assert line[2] in int_var
-                assert line[3] in int_var
-                int_var.add(line[1])
-            elif line[0] == 'cat_str':
-                assert line[2] in str_ref
-                assert line[3] in str_ref
-                str_ref.add(line[1])
-            elif line[0] == 'eq_str':
-                assert line[2] in str_ref
-                assert line[3] in str_ref
-                int_var.add(line[1])
+            if line[0] == 'libcall':
+                for arg in line[4:]:
+                    assert arg in symbols
+                if line[2] is not None:
+                    symbols.add(line[2])
+            elif line[0] in operations:
+                assert line[2] in symbols
+                assert line[3] in symbols
+                symbols.add(line[1])
             elif line[0] == 'end':
                 pass
             elif line[0] in ('jmpT', 'jmpz'):
-                assert line[2] in int_var
+                assert line[2] in symbols
             elif line[0] == 'jmp':
                 pass
             elif line[0] == 'label':
@@ -171,71 +179,41 @@ class TAC:
         asm.extproc('inputi')
         asm.extproc('inputs')
         
-        asm.data()
-        
+        asm.rodata()
         for sym, val in self.consts.items():
             if isinstance(val, str):
                 asm.label(asm.local('_const_'+sym))
                 asm.bytes([ord(x) for x in val+'\0'])
                 
+        asm.data()
         for sym, val in self.consts.items():
             if not isinstance(val, str):
                 asm.label(asm.local(sym))
                 asm.dword(val)
-                
-        for sym in int_var:
-            if sym not in self.consts:
-                asm.label(asm.local(sym))
-                asm.dword(0)
-                
-        for sym, val in self.consts.items():
-            if isinstance(val, str):
+            else:
                 asm.label(asm.local(sym))
                 asm.dword(asm.local('_const_'+sym))
-                
-        for sym in str_ref:
+             
+        for sym in symbols:
             if sym not in self.consts:
                 asm.label(asm.local(sym))
                 asm.dword(0)
-    
+   
         asm.code()
         asm.label(asm.cname('main'))
     
         for line in self.code:
-            if line[0] == 'prints':
-                asm.mov(asm.eax, asm.local(line[1]))
-                asm.push(asm.eax)
-                asm.call(asm.cname('prints'))
-                asm.pop(asm.eax)
-            elif line[0] == 'inputs':
-                asm.call(asm.cname('inputs'))
-                asm.mov(asm.local(line[1]), asm.eax)
-            elif line[0] == 'printi':
-                asm.mov(asm.eax, asm.local(line[1]))
-                asm.push(asm.eax)
-                asm.call(asm.cname('printi'))
-                asm.pop(asm.eax)
-            elif line[0] == 'cat_str':
-                asm.mov(asm.eax, asm.local(line[3]))
-                asm.push(asm.eax)
-                asm.mov(asm.eax, asm.local(line[2]))
-                asm.push(asm.eax)
-                asm.call(asm.cname('cat_str'))
-                asm.mov(asm.local(line[1]), asm.eax)
-                asm.pop(asm.eax)
-                asm.pop(asm.eax)
-            elif line[0] == 'eq_str':
-                asm.mov(asm.eax, asm.local(line[3]))
-                asm.push(asm.eax)
-                asm.mov(asm.eax, asm.local(line[2]))
-                asm.push(asm.eax)
-                asm.call(asm.cname('eq_str'))
-                asm.mov(asm.local(line[1]), asm.eax)
-                asm.pop(asm.eax)
-                asm.pop(asm.eax)
-            elif line[0] == 'inputi':
-                asm.call(asm.cname('inputi'))
-                asm.mov(asm.local(line[1]), asm.eax)
+            if line[0] == 'libcall':
+                nb_arg = line[1]
+                ret_var = line[2]
+                libfunc = line[3]
+                for arg in line[4:4+nb_arg]:
+                    asm.push(asm.local(arg))
+                asm.call(asm.cname(libfunc))
+                if ret_var is not None:
+                    asm.mov(asm.local(ret_var), asm.eax)
+                for arg in line[4:4+nb_arg]:
+                    asm.pop(asm.eax)
             elif line[0] == 'eq_int':
                 asm.mov(asm.eax, asm.local(line[2]))
                 asm.mov(asm.ecx, asm.imm(0))

@@ -17,8 +17,8 @@ class RegMixin(object):
     @property
     def ebp(self):
         return self.reg('ebp')
-
-
+    
+    
 class GASM(RegMixin):
     def __init__(self, fname):
         self.f = open(fname, 'w')
@@ -34,9 +34,6 @@ class GASM(RegMixin):
     
     def reg(self, name):
         return '%%%s' % name
-    
-    def label(self, name):
-        return '$%s' % name
     
     def imm(self, value):
         return '$%s' % value
@@ -64,6 +61,9 @@ class GASM(RegMixin):
     
     def data(self):
         self.emit('.data')
+        
+    def rodata(self):
+        self.emit('.section .rodata')
     
     def label(self, name):
         self.emit('%s:' % name)
