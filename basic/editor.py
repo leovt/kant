@@ -3,7 +3,10 @@ import tkFileDialog
 import tkMessageBox
 import basic
 import scanner
+import parser
 import sys
+import Queue as queue
+import threading
 
 class Editor(tk.Text):
     def __init__(self, master, source='', **conf):
@@ -45,7 +48,61 @@ class Editor(tk.Text):
 
     def get_text(self):
         return self.get('1.0', 'end')
+    
+class Console(tk.Frame):
+    def __init__(self, master, **conf):
+        tk.Frame.__init__(self, master, **conf)
+        self.read_queue = queue.Queue()
+        self.write_queue = queue.Queue()
+        self.textvar = tk.StringVar()
         
+        self.label = tk.Label(self, fg='white', bg='black', height=10, anchor='sw', justify='left', font=('Courier', 12))
+        self.label.grid(row=1, column=1, sticky='nswe')
+        self.entry = tk.Entry(self, textvariable=self.textvar, fg='white', bg='black', font=('Courier', 12))
+        self.entry.grid(row=2, column=1, sticky='nswe')
+        self.entry.bind('<Return>', self.on_return)
+        
+        self.rowconfigure(1, weight=1)
+        self.columnconfigure(1, weight=1)
+
+        self.after(300, self.check_queue)
+    
+    def read(self):
+        return self.read_queue.get()
+    
+    def write(self, text):
+        self.write_queue.put(text)
+        
+    def check_queue(self):
+        while True:
+            try:
+                text = self.write_queue.get_nowait()
+            except queue.Empty:
+                break
+            else:
+                self.label['text'] += text
+        self.after(20, self.check_queue)
+            
+    def on_return(self, event):
+        text = self.textvar.get()+'\n'
+        self.write_queue.put(text)
+        self.read_queue.put(text)
+        self.textvar.set('')
+        
+    def clear(self):
+        try:
+            while True:
+                self.read_queue.get_nowait()
+        except queue.Empty:
+            pass
+        try:
+            while True:
+                self.write_queue.get_nowait()
+        except queue.Empty:
+            pass
+        self.label['text'] = ''
+        self.textvar.set('')
+                
 class IDE:
     def __init__(self, root):
         self.root = root
@@ -59,6 +116,10 @@ class IDE:
         filemenu.add_command(label='Save', command=self.on_file_save)
         filemenu.add_command(label='Save As', command=self.on_file_save_as)
         
+        progmenu = tk.Menu(menubar)
+        menubar.add_cascade(label='Program', menu=progmenu)
+        progmenu.add_command(label='Run', command=self.on_run_program)
+        
         self.root.config(menu=menubar)
         
         self.editor = Editor(self.root, border=0)
@@ -71,7 +132,10 @@ class IDE:
         hscroll.grid(column=1, row=2, sticky='ew')
         self.editor.config(xscrollcommand=hscroll.set)
 
-        self.editor.grid(column=1, row=1, sticky='nsew')
+        self.editor.grid(column=1, row=1, sticky='nswe')
+        
+        self.console = Console(self.root, border=0, bg='red')
+        self.console.grid(column=1, row=2, sticky='nswe')
         
         self.root.rowconfigure(1, weight=1)
         self.root.columnconfigure(1, weight=1)
@@ -140,7 +204,12 @@ class IDE:
         else:
             self.save(self.filename)
             return True
-            
+        
+    def on_run_program(self):
+        ast = parser.parse(self.editor.get_text().splitlines())
+        self.console.clear()
+        interp = basic.ASTInterpreter(ast, self.console.write, self.console.read)
+        threading.Thread(target=interp.execute).start()    
         
 def main():
     root = tk.Tk()

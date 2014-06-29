@@ -3,6 +3,7 @@ import parser
 from operator import add, sub, mul, div, eq
 import subprocess
 import asmw
+import sys
 
 operations = {
     'add_int': add,
@@ -14,13 +15,15 @@ operations = {
     'cat_str': add}
 
 class ASTInterpreter:
-    def __init__(self, ast_context):
+    def __init__(self, ast_context, write=sys.stdout.write, read=sys.stdin.readline):
         self.const_int = ast_context.const_int
         self.const_str = ast_context.const_str
         self.integers = [0] * ast_context.nb_int
         self.strings = [''] * ast_context.nb_str
         self.code = ast_context.code
         self.labels = ast_context.labels
+        self.read = read
+        self.write = write
 
     def evaluate(self, expr):
         if expr[0] in operations:
@@ -58,7 +61,8 @@ class ASTInterpreter:
     def exec_one_instr(self, instr):
         if instr[0] == 'input':
             prompt = self.evaluate(instr[1])
-            result = raw_input(prompt)
+            self.write(prompt)
+            result = self.read().rstrip('\n')
             if instr[2] == 'int':
                 self.integers[instr[3]] = int(result)
             else:
@@ -75,7 +79,7 @@ class ASTInterpreter:
         elif instr[0] == 'goto':
             return instr[1]
         elif instr[0] == 'print':
-            print ' '.join(str(self.evaluate(ex)) for ex in instr[1:])
+            self.write(' '.join(str(self.evaluate(ex)) for ex in instr[1:])+'\n')
         elif instr[0] == 'end':
             return 'end'
         else:
@@ -221,15 +225,18 @@ opnames = [
  'jmpz'
  ]
 opcodes = {name:i for i,name in enumerate(opnames)}
-     
-with open('opcodes.h', 'w') as f:
-    f.write('static const char* opnames[] = {\n' + 
-            ',\n'.join('"%s"' % name for name in opnames) + 
-            '\n};\n')
-    f.write('enum opcodes{')
-    for i, name in enumerate(opnames):
-        f.write('    op_%s = %d,\n' % (name, i))
-    f.write('};\n')
+
+def write_opcodes_h():     
+    with open('opcodes.h', 'w') as f:
+        f.write('static const char* opnames[] = {\n' + 
+                ',\n'.join('"%s"' % name for name in opnames) + 
+                '\n};\n')
+        f.write('enum opcodes{')
+        for i, name in enumerate(opnames):
+            f.write('    op_%s = %d,\n' % (name, i))
+        f.write('};\n')
+
+write_opcodes_h()
 
 def execute_trans(bc_context):
     ip = 0
@@ -307,7 +314,7 @@ def execute_trans(bc_context):
             print len(istack), len(sstack)
 
         else:
-            assert False, instr
+            assert False, mnemonic
 
         
         
@@ -320,10 +327,8 @@ if __name__ == '__main__':
     
     tac_ctx = tac.TAC.fromast(ast_ctx)
     
-    import pprint
-    
-    pprint.pprint(tac_ctx.code)
-    #tac_ctx.interpreter()
+    tac_ctx.dump()
+    tac_ctx.interpreter()
     asm = asmw.GASM('test.s')
     tac_ctx.compile(asm)
     asm.close()
