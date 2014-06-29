@@ -1,7 +1,7 @@
 import Tkinter as tk
 import tkFileDialog
 import tkMessageBox
-import basic
+import ast_interpreter
 import scanner
 import parser
 import sys
@@ -140,6 +140,7 @@ class IDE:
         self.root.rowconfigure(1, weight=1)
         self.root.columnconfigure(1, weight=1)
         
+        self.filename = None
         self.on_file_new()
         
     def check_need_save(self):
@@ -208,7 +209,7 @@ class IDE:
     def on_run_program(self):
         ast = parser.parse(self.editor.get_text().splitlines())
         self.console.clear()
-        interp = basic.ASTInterpreter(ast, self.console.write, self.console.read)
+        interp = ast_interpreter.ASTInterpreter(ast, self.console.write, self.console.read)
         threading.Thread(target=interp.execute).start()    
         
 def main():
