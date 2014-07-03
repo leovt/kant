@@ -207,7 +207,7 @@ class TAC:
                 nb_arg = line[1]
                 ret_var = line[2]
                 libfunc = line[3]
-                for arg in line[4:4+nb_arg]:
+                for arg in reversed(line[4:4+nb_arg]):
                     asm.push(asm.local(arg))
                 asm.call(asm.cname(libfunc))
                 if ret_var is not None:

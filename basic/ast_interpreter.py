@@ -1,13 +1,14 @@
 import sys
 from operator import add, sub, mul, div, eq
+import parser
 
 operations = {
     'add_int': add,
     'sub_int': sub,
     'mul_int': mul,
     'div_int': div,
-    'eq_int': eq,
-    'eq_str': eq,
+    'eq_int': lambda x,y: int(eq(x,y)),
+    'eq_str': lambda x,y: int(eq(x,y)),
     'cat_str': add}
 
 class ASTInterpreter:
@@ -75,8 +76,16 @@ class ASTInterpreter:
         elif instr[0] == 'goto':
             return instr[1]
         elif instr[0] == 'print':
-            self.write(' '.join(str(self.evaluate(ex)) for ex in instr[1:])+'\n')
+            self.write(''.join(str(self.evaluate(ex)) for ex in instr[1:])+'\n')
         elif instr[0] == 'end':
             return 'end'
         else:
             assert False, instr
+            
+def main(fname):
+    with open(fname, 'r') as infile:
+        ast_ctx = parser.parse(infile)
+    ASTInterpreter(ast_ctx).execute()
+    
+if __name__ == '__main__':
+    main(sys.argv[1])
